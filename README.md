@@ -5,7 +5,9 @@ Working on another project which involves writing software for the BBC Micro, I 
 
 DFSBuster is designed to take as its input a disk image file; and allows the directory structure of the disk to be examined and individual files extracted, and files to be added to the disk image.  This may then be mounted in the emulator, allowing the exchange of data between the target and host systems.
 
-DFS was the BBC Micro's Disk Filing System, and seems to be a descendant of the Acorn System DFS.  It uses a very simple disk structure.  Each track of the disk is divided into 10 sectors.  Each disk sector is 256 bytes in size, corresponding exactly to a machine page.  Sectors are numbered sequentially around one track and on to the next track*  The first two sectors  (=512 bytes)  of a disk are reserved for the Catalogue.  This contains one "disk" entry and up to 31 "file" entries.  Each entry occupies eight bytes in the first sector and eight bytes in the second sector.
+DFS was the BBC Micro's Disk Filing System, and seems to be a descendant of the Acorn System DFS.  It uses a very simple disk structure.  Each track of the disk is divided into 10 sectors.  Each disk sector is 256 bytes in size, corresponding exactly to a machine page.  Sectors are numbered sequentially around one track and on to the next track*
+
+The first two sectors  (=512 bytes)  of a disk are reserved for the Catalogue.  This contains one "disk" entry and up to 31 "file" entries.  Each entry occupies eight bytes in the first sector and eight bytes in the second sector.
 
 * The disc title (12 characters) is stored in bytes 0-7 and 256-259.
 * The number of write cycles is stored in byte 260, but as a binary-coded decimal number.
