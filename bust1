@@ -1,0 +1,143 @@
+#!/usr/bin/perl -w
+use strict;
+use constant { TRUE => 1, FALSE => "" };
+
+my $filename = "bbcpcb2.bbc";
+my (@catalogue, @filename, @load, @length, @exec, @sector);
+my ($writes, $files, $boot_mode, $sectors);
+my $image = "";
+my $catalogue = "";
+my $title = "";
+my ($done, $i, $f, $yn, $data);
+
+my @boot_mode = ("Not bootable", "*LOAD", "*RUN", "*EXEC");
+
+#########################  BEGIN FUNCTION DEFINITIONS  #########################
+
+sub nul2spc {
+    my $ans = "";
+    my $ascii = shift;
+    if ($ascii) {
+        $ans .= pack "C", $ascii;
+    }
+    else {
+        $ans .= " ";
+    };
+    $ans;
+};
+
+##########################  END FUNCTION DEFINITIONS  ##########################
+
+$filename = shift if @ARGV;
+
+open FH, "<", $filename or die "Could not open $filename: $!";
+read FH, $catalogue, 512;
+for ($i = 0; $i < 512; ++$i) {
+    $catalogue[$i] = ord substr $catalogue, $i, 1;
+};
+$image = $catalogue;
+while (read FH, $_, 4096) {
+    $image .= $_;
+};
+close FH;
+
+$title = "";
+for ($i = 0; $i < 8; ++$i) {
+    $title .= nul2spc $catalogue[$i];
+};
+for ($i = 256; $i < 260; ++$i) {
+    $title .= nul2spc $catalogue[$i];
+};
+
+$writes = ($catalogue[260] & 0xf) + 10 * (($catalogue[260] & 0xf0) >> 4);
+$files = ($catalogue[261] & 0xf8) >> 3;
+$boot_mode = ($catalogue[262] & 0x30) >> 4;
+$sectors = $catalogue[263] + ($catalogue[263] & 0x3) << 8;
+
+$done = FALSE;
+$f = 1;
+for ($i = 8; $i < 255 && !$done; $i += 8) {
+    $filename = (nul2spc $catalogue[$i + 7]) . "." . (nul2spc $catalogue[$i])
+              . (nul2spc $catalogue[$i + 1]) . (nul2spc $catalogue[$i + 2])
+              . (nul2spc $catalogue[$i + 3]) . (nul2spc $catalogue[$i + 4])
+              . (nul2spc $catalogue[$i + 5]) . (nul2spc $catalogue[$i + 6]);
+    $filename[$f] = $filename;
+
+    $load[$f] = $catalogue[$i + 256]
+              + (($catalogue[$i + 257]) << 8)
+              + (($catalogue[$i + 262] & 0x0c) << 14);
+    $exec[$f] = $catalogue[$i + 258]
+              + (($catalogue[$i + 259]) << 8)
+              + (($catalogue[$i + 262] & 0xc0) << 10);
+    $length[$f] = $catalogue[$i + 260]
+                + (($catalogue[$i + 261]) << 8)
+                + (($catalogue[$i + 262] & 0x30) << 12);
+    $sector[$f] = $catalogue[$i + 263]
+                + (($catalogue[$i + 262] & 0x03) << 8);
+
+    ++$f;
+};
+print "Volume title is '$title'.\n";
+printf "Writes: %02d  Boot mode %d (%s)\n", $writes, $boot_mode, $boot_mode[$boot_mode];
+printf "Sectors: %d Files: %d\n", $sectors, $files;
+print "\n";
+$i = 0;
+for ($f = 1; $f <= $files; ++$f) {
+    printf "%4d: %8s ", $f, $filename[$f];
+    print "\n" if $i++ % 4 == 3;
+};
+
+print "\n";
+
+$done = FALSE;
+while (!$done) {
+    $f = 0;
+    while (!$done && ($f < 1 || $f > $files)) {
+        print "Select file : ";
+        $_ = <>;
+        if (/(\d+)/) {
+            $f = $1;
+        };
+        if (/^$/) {
+            $done = TRUE;
+        };
+    };
+
+    if (!$done) {    
+        printf "File %2d is '%s'\n", $f, $filename[$f];
+        printf "Load address %05x -- Exec address %05x\n", $load[$f], $exec[$f];
+        printf "Length %05x -- starting sector %03x\n", $length[$f], $sector[$f];
+        
+        print "\n";
+        
+        print "Enter filename to write : ";
+        $_ = <>;
+        if (/(\S+)/) {
+           $filename = $1;
+        };
+        
+        if ($filename) {
+            $data = substr $image, 256 * $sector[$f], $length[$f];
+            $yn = "";
+            while (!$yn) {
+                print "Remove BBC line endings? ";
+                $_ = <>;
+                if (/([yYnN])/) {
+                    $yn = $1;
+                };
+            };
+            
+            if ($yn =~ /y/i) {
+                $data =~ s/\n\r/\n/g;
+            };
+            
+            open FH, ">", $filename;
+            print FH $data;
+            close FH;
+        };
+        $done = TRUE;
+    };
+};
+        
+exit;
+
