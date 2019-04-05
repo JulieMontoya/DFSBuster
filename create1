@@ -1,0 +1,235 @@
+#!/usr/bin/perl -w
+use strict;
+use constant { TRUE => 1, FALSE => "" };
+
+my $filename = "bbcpcb2.bbc";
+my (@catalogue, @filename, @load, @length, @exec, @sector, @data);
+my ($prompt, $load, $length, $exec, $sector);
+my ($writes, $files, $boot_mode, $sectors);
+my $image = "";
+my $catalogue = "";
+my $title = "";
+my ($done, $i, $f, $yn, $data, $add_cr, $total_length, $directory);
+my $bbc_name = "";
+my $bbc_dir = "\$";
+my $image_name = "";
+
+my @boot_mode = ("Not bootable", "*LOAD", "*RUN", "*EXEC");
+
+#########################  BEGIN FUNCTION DEFINITIONS  #########################
+
+sub nul2spc {
+    my $ans = "";
+    my $ascii = shift;
+    if ($ascii) {
+        $ans .= pack "C", $ascii;
+    }
+    else {
+        $ans .= " ";
+    };
+    $ans;
+};
+
+sub get_string {
+    my $prompt = shift // " : ";
+    print $prompt;
+    $_ = <>;
+    tr/\r\n//d;
+    $_;
+};
+
+sub y_or_n {
+    my $prompt = shift // " : ";
+    my $yn = "";
+    while (!$yn) {
+        print $prompt;
+        $_ = <>;
+        if (/([yYnN])/) {
+            $yn = $1;
+        };
+    };
+    lc $yn;
+};
+
+##########################  END FUNCTION DEFINITIONS  ##########################
+
+for ($i = 0; $i < 512; ++$i) {
+    $catalogue[$i] = 0;
+};
+
+$title = get_string "Volume title : " // "DFS$$";
+$title = uc $title;
+$title .= " " x 12;
+for ($i = 0; $i < 8; ++$i) {
+    $catalogue[$i] = unpack "C", (substr $title, $i, 1);
+};
+
+for ($i = 256; $i < 260; ++$i) {
+    $catalogue[$i] = unpack "C", (substr $title, ($i - 248), 1);
+};
+
+$boot_mode = "";
+while ($boot_mode eq ""){
+    print "Boot mode (";
+    for ($i = 0; $i < @boot_mode; ++$i) {
+        printf " %d=%s", $i, $boot_mode[$i];
+    };
+    print " )";
+    $_ = get_string " : ";
+    if ($_ =~/^([0-4])$/) {
+        $boot_mode = $_;
+    }
+    elsif ($_ =~ /^$/) {
+        $boot_mode = "0";
+    };
+};
+
+$files = 1;
+$sectors = 400;
+
+$catalogue[260] = 1;            #  write cycles
+$catalogue[261] = 8 * $files;   #  number of files
+$catalogue[262] = ($boot_mode << 4) | (($sectors & 0x300) >> 8);
+$catalogue[263] = ($sectors & 0xff);
+
+$sector = 2;
+
+$done = FALSE;
+while (!$done) {
+    $filename = "";
+    $prompt = $files > 1 ? "File to add (RETURN when done) : " : "File to add : ";
+    while (!$filename && !$done) {
+        $filename = get_string $prompt;
+        if ($filename eq "" && $files > 1) {
+            print "Done!\n";
+            $done = TRUE;
+        };
+        $filename = "" unless -e $filename;
+    };
+
+    unless ($done) {
+        $data = "";
+        open FH, "<", $filename;
+        while (read FH, $_, 4096) {
+            $data .= $_;
+        };
+        close FH;
+
+        $add_cr = y_or_n "Insert BBC line endings ? ";
+        if ($add_cr =~ /y/i) {
+            $data =~ s/\n/\n\r/g;
+        };
+
+        #  Pad out to sector (256 byte) boundary
+        $total_length = $length = length $data;
+        while ($total_length % 256) {
+            $data .= pack "C", 0;
+            ++$total_length;
+        };
+
+        $bbc_name = "";
+        while (!$bbc_name) {
+            $bbc_name = get_string "Filename on BBC disk : ";
+            if ($bbc_name =~ /^(.)\.(.{1,7})/) {
+                $bbc_dir = $1;
+                $bbc_name = $2;
+            }
+            else {
+                $bbc_dir = "\$";
+            };
+            $bbc_name = uc substr $bbc_name, 0, 7;
+        };
+
+        #  Don't ask for load and execution addresses if we altered the line
+        #  endings (which implies it was not a memory dump.)
+
+        $load = $add_cr ? "00000" : "";
+        while (!($load =~ /^[0-3]?[0-9a-f]{1,4}$/i)) {
+            $load = get_string "Load address : ";
+        };
+        $load = hex $load;
+
+        $exec = $add_cr ? "00000" : "";
+        while (!($exec =~ /^[0-3]?[0-9a-f]{1,4}$/i)) {
+            $exec = get_string "Execution address : ";
+        };
+        $exec = hex $exec;
+
+        printf "File %2d is '%s'\n", $files, $bbc_name;
+        printf "Load address %05x -- Exec address %05x\n", $load, $exec;
+        printf "Length %05x -- starting sector %03x\n", $length, $sector;
+        printf "Total length %05x\n", $total_length;
+
+        #####  THIS IS THE FULL ATTRIBUTES OF THE FILE  #####
+
+        if ($files > 1) {       #  Move entire catalogue 8 bytes forwards
+            print "$files files. Moving catalogue.\n";
+            for ($i = $files * 8 + 7; $i >= 16; --$i) {
+                printf "catalogue[%d] goes to [%d]  (%02x)\n", $i - 8, $i, $catalogue[$i - 8];
+                $catalogue[$i] = $catalogue[$i - 8];
+                printf "catalogue[%d] goes to [%d]  (%02x)\n", $i + 256, $i + 248, $catalogue[$i + 256];
+                $catalogue[$i + 256] = $catalogue[$i + 248];
+            };
+            $catalogue[261] = 8 * $files;
+        };
+
+        #  Store the filename in bytes 8 to 14
+        $bbc_name .= " " x 8;
+        for ($i = 0; $i < 7; ++$i) {
+            $catalogue[$i + 8] = unpack "C", substr $bbc_name, $i, 1;
+        };
+        #  Store directory in byte 15
+        $catalogue[15] = unpack "C", substr $bbc_dir, 0, 1;
+
+        #  Load address
+        $catalogue[264] = $load & 0xff;
+        $catalogue[265] = (($load & 0xff00) >> 8) & 0xff;
+
+        #  Execution address
+        $catalogue[266] = $exec & 0xff;
+        $catalogue[267] = (($exec & 0xff00) >> 8) & 0xff;
+
+        #  Length
+        $catalogue[268] = $length & 0xff;
+        $catalogue[269] = (($length & 0xff00) >> 8) & 0xff;
+
+        #  High-order bits and starting sector
+        $catalogue[270] = (($exec & 0x30000) >> 10)
+                        | (($length & 0x30000) >> 12)
+                        | (($load & 0x30000) >> 14)
+                        | (($sector & 0x300) >> 8);
+        $catalogue[271] = $sector & 0xff;
+
+        $sector += ($total_length & 0x3ff00) >> 8;
+
+        $data[$files++] = $data;
+        
+        #$done = TRUE;
+    };
+};
+
+##########################  BUILD UP THE  DISC IMAGE  ##########################
+
+--$files;   #  we increased it once too many
+$image = "";
+
+$image .= pack "C512", @catalogue;
+for ($i = 1; $i <= $files; ++$i) {
+    print "Adding file $i to image ...\n";
+    $image .= $data[$i];
+};
+
+$total_length = length $image;
+printf "Total length before rounding %05x\n", $total_length;
+while ($total_length % 256) {
+    $image .= pack "C", 0;
+    ++$total_length;
+};
+
+printf "Start on sector %03x -- Total length %05x\n", $sector, $total_length;
+
+open FH, ">", "image.dfs";
+print FH $image;
+close FH;
+
+exit;
