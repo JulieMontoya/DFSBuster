@@ -2,6 +2,11 @@
 use strict;
 use constant { TRUE => 1, FALSE => "" };
 
+# NO RIGHTS RESERVED. THIS CODE IS DEDICATED TO THE PUBLIC DOMAIN.
+# 
+# YOU MAY USE IT, ABUSE IT, ENJOY IT, DESTROY IT, STUDY IT, SHARE
+# IT AND ADAPT IT WITHOUT RESTRICTION.
+
 my $filename = "bbcpcb2.bbc";
 my (@catalogue, @filename, @load, @length, @exec, @sector, @data);
 my ($prompt, $load, $length, $exec, $sector);
