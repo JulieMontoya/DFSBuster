@@ -1,7 +1,11 @@
-This seems to work fine with BeebEm -- the images I have created can be written to, read from and given the DFSBuster treatment.  Now the next step is to combine the two programs into one, allowing files to be extracted from or added to an existing disc image.  After that, we need to add command line flag processing abilities.
+This seems to work fine with BeebEm -- the images I have created can be written to, read from and given the DFSBuster
+treatment.  Now the next step is to combine the two programs into one, allowing files to be extracted from or added
+to an existing disc image.  After that, we need to add command line flag processing abilities.
 
-The final DFSBuster, when run totally non-interactively, will behave similarly to a generic archiver  (DFS images can be thought of as a special archive format)  and so it might well be possible to add a binding to a GUI front-end.
+The final DFSBuster, when run totally non-interactively, will behave similarly to a generic archiver  (DFS images can
+be thought of as a special archive format)  and so it might well be possible to add a binding to a GUI front-end.
 
-DFSBuster so far works only with single-sided disk images.  The format of a double-sided image is yet to be investigated, but almost certainly consists of two image files concatenated or interleaved somehow.
+DFSBuster so far works only with single-sided disk images.  The format of a double-sided image is yet to be investigated,
+but almost certainly consists of two image files concatenated or interleaved somehow.
 
 A rewrite in C might be worthwhile one day.
