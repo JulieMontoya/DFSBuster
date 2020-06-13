@@ -1,0 +1,378 @@
+#!/usr/bin/perl -w
+use strict;
+use constant { TRUE => 1, FALSE => "" };
+
+my $image_filename = "bbcpcb2.bbc";
+my (@catalogue, @filename, @load, @length, @exec, @sector);
+my ($writes, $files, $boot_mode, $sectors);
+my $image_data = "";
+my $catalogue = "";
+my $title = "";
+my ($done, $filename, $i, $f, $yn, $data);
+my ($beeb_filename, $load_addr, $exec_addr, $length);
+
+my @boot_mode = ("Not bootable", "*LOAD", "*RUN", "*EXEC");
+
+my %TOKENS = ( 128 => "AND",
+               129 => "DIV",
+               130 => "EOR",
+               131 => "MOD",
+               132 => "OR",
+               133 => "ERROR",
+               134 => "LINE",
+               135 => "OFF",
+               136 => "STEP",
+               137 => "SPC",
+               138 => "TAB(",
+               139 => "ELSE",
+               140 => "THEN",
+#                141 => "55808",
+               142 => "OPENIN",
+               143 => "PTR",
+               144 => "PAGE",
+               145 => "TIME",
+               146 => "LOMEM",
+               147 => "HIMEM",
+               148 => "ABS",
+               149 => "ACS",
+               150 => "ADVAL",
+               151 => "ASC",
+               152 => "ASN",
+               153 => "ATN",
+               154 => "BGET",
+               155 => "COS",
+               156 => "COUNT",
+               157 => "DEG",
+               158 => "ERL",
+               159 => "ERR",
+               160 => "EVAL",
+               161 => "EXP",
+               162 => "EXT",
+               163 => "FALSE",
+               164 => "FN",
+               165 => "GET",
+               166 => "INKEY",
+               167 => "INSTR(",
+               168 => "INT",
+               169 => "LEN",
+               170 => "LN",
+               171 => "LOG",
+               172 => "NOT",
+               173 => "OPENUP",
+               174 => "OPENOUT",
+               175 => "PI",
+               176 => "POINT(",
+               177 => "POS",
+               178 => "RAD",
+               179 => "RND",
+               180 => "SGN",
+               181 => "SIN",
+               182 => "SQR",
+               183 => "TAN",
+               184 => "TO",
+               185 => "TRUE",
+               186 => "USR",
+               187 => "VAL",
+               188 => "VPOS",
+               189 => "CHR\$",
+               190 => "GET\$",
+               191 => "INKEY\$",
+               192 => "LEFT\$(",
+               193 => "MID\$(",
+               194 => "RIGHT\$(",
+               195 => "STR\$",
+               196 => "STRING\$(",
+               197 => "EOF",
+               198 => "AUTO",
+               199 => "DELETE",
+               200 => "LOAD",
+               201 => "LIST",
+               202 => "NEW",
+               203 => "OLD",
+               204 => "RENUMBER",
+               205 => "SAVE",
+               206 => "",
+               207 => "PTR",
+               208 => "PAGE",
+               209 => "TIME",
+               210 => "LOMEM",
+               211 => "HIMEM",
+               212 => "SOUND",
+               213 => "BPUT",
+               214 => "CALL",
+               215 => "CHAIN",
+               216 => "CLEAR",
+               217 => "CLOSE",
+               218 => "CLG",
+               219 => "CLS",
+               220 => "DATA",
+               221 => "DEF",
+               222 => "DIM",
+               223 => "DRAW",
+               224 => "END",
+               225 => "ENDPROC",
+               226 => "ENVELOPE",
+               227 => "FOR",
+               228 => "GOSUB",
+               229 => "GOTO",
+               230 => "GCOL",
+               231 => "IF",
+               232 => "INPUT",
+               233 => "LET",
+               234 => "LOCAL",
+               235 => "MODE",
+               236 => "MOVE",
+               237 => "NEXT",
+               238 => "ON",
+               239 => "VDU",
+               240 => "PLOT",
+               241 => "PRINT",
+               242 => "PROC",
+               243 => "READ",
+               244 => "REM",
+               245 => "REPEAT",
+               246 => "REPORT",
+               247 => "RESTORE",
+               248 => "RETURN",
+               249 => "RUN",
+               250 => "STOP",
+               251 => "COLOUR",
+               252 => "TRACE",
+               253 => "UNTIL",
+               254 => "WIDTH",
+               255 => "OSCLI" );
+
+#########################  BEGIN FUNCTION DEFINITIONS  #########################
+
+sub nul2spc {
+    my $ans = "";
+    my $ascii = shift;
+    if ($ascii) {
+        $ans .= pack "C", $ascii;
+    }
+    else {
+        $ans .= " ";
+    };
+    $ans;
+};  #  nul2spc
+
+sub read_catalogue {
+    my $image_filename = shift;
+    my ($done, $i, $j, $f, $filename);
+    
+    open FH, "<", $image_filename or die "Could not open $image_filename: $!";
+    read FH, $catalogue, 512;
+    for ($i = 0; $i < 512; ++$i) {
+        $catalogue[$i] = ord substr $catalogue, $i, 1;
+    };
+    $image_data = $catalogue;
+    while (read FH, $_, 4096) {
+        $image_data .= $_;
+    };
+    close FH;
+
+    $title = "";
+    for ($i = 0; $i < 8; ++$i) {
+        $title .= nul2spc $catalogue[$i];
+    };
+    for ($i = 256; $i < 260; ++$i) {
+        $title .= nul2spc $catalogue[$i];
+    };
+
+    $writes    = ($catalogue[260] & 0xf) + 10 * (($catalogue[260] & 0xf0) >> 4);
+    $files     = ($catalogue[261] & 0xf8) >> 3;
+    $boot_mode = ($catalogue[262] & 0x30) >> 4;
+    $sectors   = $catalogue[263] + ($catalogue[263] & 0x3) << 8;
+
+    $done = FALSE;
+    $f = 1;
+    for ($i = 8; $i < 255 && !$done; $i += 8) {
+        $filename[$f] = (nul2spc $catalogue[$i + 7]) . ".";
+        for ($j = 0; $j < 7; ++$j) {
+            $filename[$f] .= nul2spc $catalogue[$i + $j];
+        };
+        $load[$f] = $catalogue[$i + 256]
+                + (($catalogue[$i + 257]) << 8)
+                + (($catalogue[$i + 262] & 0x0c) << 14);
+        $exec[$f] = $catalogue[$i + 258]
+                + (($catalogue[$i + 259]) << 8)
+                + (($catalogue[$i + 262] & 0xc0) << 10);
+        $length[$f] = $catalogue[$i + 260]
+                    + (($catalogue[$i + 261]) << 8)
+                    + (($catalogue[$i + 262] & 0x30) << 12);
+        $sector[$f] = $catalogue[$i + 263]
+                    + (($catalogue[$i + 262] & 0x03) << 8);
+        ++$f;
+    };
+};  #  read_catalogue
+
+sub display_catalogue {
+    print "Volume title is '$title'.\n";
+    printf "Writes: %02d  Boot mode %d (%s)\n", $writes, $boot_mode, $boot_mode[$boot_mode];
+    printf "Sectors: %d Files: %d\n", $sectors, $files;
+    print "\n";
+    $i = 0;
+    for ($f = 1; $f <= $files; ++$f) {
+        printf "%4d: %8s ", $f, $filename[$f];
+        print "\n" if $i++ % 4 == 3;
+    };
+
+    print "\n";
+};  #  display_catalogue
+
+sub display_file_info {
+    my $f = shift;      #  file number within catalogue
+    printf "File %2d is '%s'\n", $f, $filename[$f];
+    printf "Load address %05x -- Exec address %05x\n", $load[$f], $exec[$f];
+    printf "Length %05x -- starting sector %03x\n", $length[$f], $sector[$f];        
+    print "\n";
+    ($filename[$f], $load[$f], $exec[$f], $length[$f]);
+};  #  display_file_info
+
+sub y_or_n {
+    my $prompt = shift || "? ";
+    my $yn = "";
+    while (!$yn) {
+        print $prompt;
+        $_ = <>;
+        if (/([yYnN])/) {
+            $yn = $1;
+        };
+    };
+    $yn;
+};  #  y_or_n
+
+sub target_file {
+    my $f = shift;      #  file number within catalogue
+    my $data = substr $image_data, 256 * $sector[$f], $length[$f];
+};  #  target_file
+
+sub detokenise {
+    my $rest_of_data = shift;
+    my ($byte1, $line_no, $length, $rest_of_line, $code, $ln1, $ln2, $ln3, $pattern);
+    my $skipped = 0;
+    my $seen_cr = FALSE;
+    my $basic = "";
+    
+    while ($rest_of_data ne "") {
+        ##################  SKIP BYTES UNTIL WE ENCOUNTER CR  ##################
+        #  (shouldn't be necessary, but might allow recovery from BAD PROGRAM
+        #   errors if we allow it)
+        while (!$seen_cr && $rest_of_data) {
+            ($byte1, $rest_of_data) = unpack "CA*", $rest_of_data;
+            if ($byte1 == 13) {
+                #printf "[%02X] ", $byte1;
+                if ($skipped) {
+                    printf "*| Skipped %d byte", $skipped;
+                    print "s" unless $skipped == 1;
+                    $skipped = 0;
+                };
+                #print "\n";
+                $seen_cr = TRUE;
+            }
+            else {
+                ++$skipped;
+                printf "[%02X] ", $byte1;
+            };
+        };
+        ########################  PROCESS REST OF LINE  ########################
+        if ($seen_cr) {
+            #  bale out if we hit the end of the program
+            last if ord $rest_of_data == 255;
+            ($line_no, $length, $rest_of_data) = unpack "nCA*", $rest_of_data;
+            #printf "%5d [length is %d]", $line_no, $length;
+
+            $pattern = sprintf "A%dA*", $length - 3;
+            ($rest_of_line, $rest_of_data) = unpack $pattern, $rest_of_data;
+            $basic .= sprintf "%5d", $line_no;
+
+            while ($rest_of_line ne "") {
+                ($code, $rest_of_line) = unpack "CA*", $rest_of_line;
+                if (($code < 32) || ($code == 127)) {
+                    $basic .= sprintf "[%02X]", $code;
+                }
+                elsif ($code == 141) {  #  141 = line number
+                    ($ln1, $ln2, $ln3, $rest_of_line) = unpack "CCCA*", $rest_of_line;
+                    $line_no = ($ln2 & 0x3f) | (($ln3 & 0x3f) << 8) | (($ln1 & 0x0c ^ 0x04) << 12) | (($ln1 & 0x30 ^ 0x10) << 2);
+                    #printf "{%x %x %x %x }", $ln2 & 0x3f, ($ln3 & 0x3f) << 8, ($ln1 & 0x0c ^ 0x04) << 12, ($ln1 & 0x30 ^ 0x10) << 2;
+                    #printf "[LINE NO %d]", $line_no;
+                    $basic .= sprintf "%d", $line_no;
+                }
+                elsif ($code >= 128 && $code <= 255) {
+                    #print "[token] ";
+                    if ($_ = $TOKENS{$code}) {
+                        $basic .= $_;
+                    }
+                    else {
+                        $basic .= sprintf "[%02X]", $code;
+                    };
+                }
+                else {
+                    $basic .= pack "C", $code;
+                    #print " ";
+                };
+            };
+            $basic .= "\n";
+        };
+    };
+    $basic;
+};  #  detokenise
+
+sub write_host_file {
+    my $host_filename = shift;
+    my $data = shift;
+    open FH, ">", $host_filename or die "Could not open $host_filename: $!";
+    print FH $data;
+    close FH;
+};  #  write_host_file
+
+##########################  END FUNCTION DEFINITIONS  ##########################
+
+$image_filename = shift if @ARGV;
+
+read_catalogue $image_filename;
+
+$done = FALSE;
+while (!$done) {
+    display_catalogue;
+
+    $f = 0;
+    while (!$done && ($f < 1 || $f > $files)) {
+        print "Select file : ";
+        $_ = <>;
+        if (/(\d+)/) {
+            $f = $1;
+        };
+        if (/^$/) {
+            $done = TRUE;
+        };
+    };
+
+    if (!$done) {
+        ($beeb_filename, $load_addr, $exec_addr, $length) = display_file_info $f;
+
+        print "Enter filename to write : ";
+        $_ = <>;
+        if (/(\S+)/) {
+           $filename = $1;
+        };
+        
+        if ($filename) {
+            $data = target_file $f;
+
+            $yn = y_or_n "Remove BBC line endings? ";
+            if ($yn =~ /y/i) {
+                $data =~ s/\n\r/\n/g;
+            }
+            else {
+                $yn = y_or_n "Detokenise? ";
+                $data = detokenise $data;
+            };
+
+            write_host_file $filename, $data;
+        };
+        #$done = TRUE;
+    };
+};
+        
+exit;
