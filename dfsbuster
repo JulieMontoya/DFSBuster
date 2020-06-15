@@ -2,6 +2,11 @@
 use strict;
 use constant { TRUE => 1, FALSE => "" };
 
+# NO RIGHTS RESERVED. THIS CODE IS DEDICATED TO THE PUBLIC DOMAIN.
+# 
+# YOU MAY USE IT, ABUSE IT, ENJOY IT, DESTROY IT, STUDY IT, SHARE
+# IT AND ADAPT IT WITHOUT RESTRICTION.
+
 my $image_filename = "bbcpcb2.bbc";
 my (@catalogue, @filename, @load, @length, @exec, @sector);
 my ($writes, $files, $boot_mode, $sectors);
@@ -360,13 +365,21 @@ while (!$done) {
         if ($filename) {
             $data = target_file $f;
 
-            $yn = y_or_n "Remove BBC line endings? ";
-            if ($yn =~ /y/i) {
-                $data =~ s/\n\r/\n/g;
-            }
-            else {
+            #  Optionally mung the file in various ways
+
+            #  BASIC programs have exec=&8023 (ModB) or &802A (M128)
+            if (($exec_addr & 0xffff) >= 0x8000 && ($exec_addr & 0xffff) <= 0x80ff) {
                 $yn = y_or_n "Detokenise? ";
-                $data = detokenise $data;
+                if ($yn =~ /y/i) {
+                    $data = detokenise $data;
+                }
+            }
+            #  Load address=&0000 probably is a *SPOOL file
+            elsif (($load_addr & 0xffff) == 0 || ($exec_addr & 0xffff) == 0) {
+                $yn = y_or_n "Remove BBC line endings? ";
+                if ($yn =~ /y/i) {
+                    $data =~ s/\n\r/\n/g;
+                };
             };
 
             write_host_file $filename, $data;
