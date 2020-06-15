@@ -5,7 +5,10 @@ Working on another project which involves writing software for the BBC Micro, I 
 
 DFSBuster is designed to take as its input a disk image file; and allows the directory structure of the disk to be examined and individual files extracted, and files to be added to the disk image.  This may then be mounted in the emulator, allowing the exchange of data between the target and host systems.
 
-The latest version of DFSBuster incorporates the ability to detokenise a BBC BASIC program as saved by SAVE, as well as convert BBC line endings  (CR or LF, CR)  to standard Unix line endings  (LF).
+The latest version of DFSBuster incorporates the ability to detokenise a BBC BASIC program as saved by SAVE, and to convert BBC line endings  (CR or LF, CR)  to standard Unix line endings  (LF).  Simple heuristics are used to determine file types as follows:
+* If the execution address is between &8000 and &80FF, the file is assumed to be a tokenised BASIC program  (this seems to be an entry point into the BASIC ROM which actually implements the NEW command)  and the option is offered to convert this to a text representation suitable for editing directly on the host system.
+* If either the load or execution address is &0000, the file is assumed to be text  (`*SPOOL` output or similar)  and the option is offered to replace BBC line endings with the host system's default line endings.
+* Otherwise the file is assumed to be data and written exactly as-is.
 
 ## History
 
