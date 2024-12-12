@@ -1,11 +1,21 @@
 #!/usr/bin/perl -w
 use strict;
 use constant { TRUE => 1, FALSE => "" };
+use Getopt::Std;
+use Data::Dumper;
 
 # NO RIGHTS RESERVED. THIS CODE IS DEDICATED TO THE PUBLIC DOMAIN.
 # 
 # YOU MAY USE IT, ABUSE IT, ENJOY IT, DESTROY IT, STUDY IT, SHARE
 # IT AND ADAPT IT WITHOUT RESTRICTION.
+
+$| = TRUE;
+
+my %OPTIONS;
+getopts "1il", \%OPTIONS;
+my $ONE_COL  = $OPTIONS{"1"};
+my $INFO     = $OPTIONS{"i"};
+my $IS_DFSLS = $OPTIONS{"l"} || ($0 =~ /dfsls/) || $ONE_COL;
 
 my $image_filename = "bbcpcb2.bbc";
 my (@catalogue, @filename, @load, @length, @exec, @sector);
@@ -13,7 +23,7 @@ my ($writes, $files, $boot_mode, $sectors);
 my $image_data = "";
 my $catalogue = "";
 my $title = "";
-my ($done, $filename, $i, $f, $yn, $data);
+my ($done, $filename, $filename_ok, $i, $f, $yn, $data);
 my ($beeb_filename, $load_addr, $exec_addr, $length);
 
 my @boot_mode = ("Not bootable", "*LOAD", "*RUN", "*EXEC");
@@ -225,6 +235,12 @@ sub display_catalogue {
     print "\n";
 };  #  display_catalogue
 
+sub display_all_info {
+    for ($f = 1; $f <= $files; ++$f) {
+        printf "%-15s %06X %06X %06X %03X\n", $filename[$f], $load[$f], $exec[$f], $length[$f], $sector[$f];
+    };
+};  #  display_all_info
+
 sub display_file_info {
     my $f = shift;      #  file number within catalogue
     printf "File %2d is '%s'\n", $f, $filename[$f];
@@ -338,9 +354,25 @@ $image_filename = shift if @ARGV;
 read_catalogue $image_filename;
 
 $done = FALSE;
+
+if ($INFO) {
+    # display_all_info;
+    for ($f = 1; $f <= $files; ++$f) {
+        printf "%-15s %06X %06X %06X %03X\n", $filename[$f], $load[$f], $exec[$f], $length[$f], $sector[$f];
+    };
+    $done = TRUE;
+};
+
+if ($ONE_COL) {
+    for ($f = 1; $f <= $files; ++$f) {
+        printf "%s\n", $filename[$f];
+    };
+    $done = TRUE;
+};
+
 while (!$done) {
     display_catalogue;
-
+   last if $IS_DFSLS;
     $f = 0;
     while (!$done && ($f < 1 || $f > $files)) {
         print "Select file : ";
@@ -356,10 +388,22 @@ while (!$done) {
     if (!$done) {
         ($beeb_filename, $load_addr, $exec_addr, $length) = display_file_info $f;
 
-        print "Enter filename to write : ";
-        $_ = <>;
-        if (/(\S+)/) {
-           $filename = $1;
+        $filename_ok = FALSE;
+        
+        while (!$filename_ok) {
+            print "Enter filename to write : ";
+            $_ = <>;
+            if (/(\S+)/) {
+                $filename = $1;
+            };
+        
+            if (-e $filename) {
+                $yn = y_or_n "File exists! Overwrite? ";
+                $filename_ok = ($yn =~ /y/i);
+            }
+            else {
+                $filename_ok = TRUE;
+            };
         };
         
         if ($filename) {
@@ -368,6 +412,8 @@ while (!$done) {
             #  Optionally mung the file in various ways
 
             #  BASIC programs have exec=&8023 (ModB) or &802A (M128)
+
+            printf "Exec address =&%05X\n", $exec_addr;
             if (($exec_addr & 0xffff) >= 0x8000 && ($exec_addr & 0xffff) <= 0x80ff) {
                 $yn = y_or_n "Detokenise? ";
                 if ($yn =~ /y/i) {
