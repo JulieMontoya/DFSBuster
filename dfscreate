@@ -1,0 +1,350 @@
+#!/usr/bin/perl -w
+use strict;
+use constant { TRUE => 1, FALSE => "" };
+use Getopt::Std;
+
+# use Data::Dumper;
+
+my %OPTIONS;
+getopts "b:d:l:s:ABFT:", \%OPTIONS;
+
+my $BBC_DIR     = $OPTIONS{"d"} || "\$";    #  d=directory
+my $BOOT_MODE   = $OPTIONS{"b"} || "0";     #  b=boot mode
+unless ($BOOT_MODE =~ /^[0-4]$/) {
+    $BOOT_MODE = "";
+};
+my $TITLE       = $OPTIONS{"T"};            #  T=title
+my $INTERACTIVE = !$OPTIONS{"F"};           #  F=files
+my $ADD_CR      = !$OPTIONS{"B"};           #  B=binary mode
+my $ADD_LINE_NO = $OPTIONS{"A"};
+my $FIRST_LINE  = $OPTIONS{"l"} || 10;
+my $LINE_STEP   = $OPTIONS{"s"} || 10;
+
+# die "Add CR: '$ADD_CR'";
+
+my $filename = "bbcpcb2.bbc";
+my (@catalogue, @filename, @load, @length, @exec, @sector, @data);
+my ($prompt, $load, $length, $exec, $sector);
+my ($writes, $files, $boot_mode, $sectors);
+my $image = "";
+my $catalogue = "";
+my $title = "";
+my ($done, $i, $f, $yn, $data, $add_cr, $total_length, $directory);
+my $bbc_name = "";
+my $bbc_dir = "\$";
+my $image_name = "";
+my $file_ok = FALSE;
+
+my @boot_mode = ("Not bootable", "*LOAD", "*RUN", "*EXEC");
+
+#########################  BEGIN FUNCTION DEFINITIONS  #########################
+
+sub nul2spc {
+    my $ans = "";
+    my $ascii = shift;
+    if ($ascii) {
+        $ans .= pack "C", $ascii;
+    }
+    else {
+        $ans .= " ";
+    };
+    $ans;
+};
+
+sub get_string {
+    my $prompt = shift // " : ";
+    print $prompt;
+    $_ = <>;
+    tr/\r\n//d;
+    $_;
+};
+
+sub y_or_n {
+    my $prompt = shift // " : ";
+    my $yn = "";
+    while (!$yn) {
+        print $prompt;
+        $_ = <>;
+        if (/([yYnN])/) {
+            $yn = $1;
+        };
+    };
+    lc $yn;
+};
+
+sub add_line_numbers {
+    my $line_no = $FIRST_LINE;
+    my $basic = "";
+    my ($rest, $l1, $prev_line_no);
+    
+    foreach (split /\n/, $_[0]) {
+        if (/^\s*\*+\|\s*(\d+)(.*)$/) {
+            $rest = $2;
+            $l1 = $1;
+            if ($1) {
+                $line_no = $1;
+                if (defined $prev_line_no && $prev_line_no > $line_no) {
+                    die "Already gone past $line_no ($prev_line_no)";
+                };
+            };
+            # if ($TEST) {
+            #     print "*|\n*|'$l1' '$rest'\n";
+            # };
+            if ($rest =~ /\D(\d+)/ && $rest !~ /was/i) {
+                $LINE_STEP = $1;
+            };
+            # if ($TEST) {
+            #     print "*|\n*| NEXT LINE $line_no -- STEP $LINE_STEP\n*|\n";
+            # };
+            next;
+        };
+        $basic .= $line_no . $_ . "\n";
+        $prev_line_no = $line_no;
+        $line_no += $LINE_STEP;
+        # print $basic;
+    };
+    
+    $basic;
+};
+
+##########################  END FUNCTION DEFINITIONS  ##########################
+
+for ($i = 0; $i < 512; ++$i) {
+    $catalogue[$i] = 0;
+};
+
+if ($INTERACTIVE) {
+    $title = get_string "Volume title : " // "DFS$$";
+}
+else {
+    $title = $TITLE if $TITLE;
+};
+$title = uc $title;
+$title .= " " x 12;
+for ($i = 0; $i < 8; ++$i) {
+    $catalogue[$i] = unpack "C", (substr $title, $i, 1);
+};
+
+for ($i = 256; $i < 260; ++$i) {
+    $catalogue[$i] = unpack "C", (substr $title, ($i - 248), 1);
+};
+
+$boot_mode = $BOOT_MODE;
+if ($INTERACTIVE) {
+    while ($boot_mode eq ""){
+        print "Boot mode (";
+        for ($i = 0; $i < @boot_mode; ++$i) {
+            printf " %d=%s", $i, $boot_mode[$i];
+        };
+        print " )";
+        $_ = get_string " : ";
+        if ($_ =~/^([0-4])$/) {
+            $boot_mode = $_;
+        }
+        elsif ($_ =~ /^$/) {
+            $boot_mode = "0";
+        };
+    };
+};
+
+$files = 1;
+$sectors = 400;
+
+$catalogue[260] = 1;            #  write cycles
+$catalogue[261] = 8 * $files;   #  number of files
+$catalogue[262] = ($boot_mode << 4) | (($sectors & 0x300) >> 8);
+$catalogue[263] = ($sectors & 0xff);
+
+$sector = 2;
+
+if ($INTERACTIVE) {
+    print "Running in interactive mode!\n";
+}
+else {
+    print "Running in BATCH mode.\n";
+};
+
+#die;
+
+
+$done = FALSE;
+while (!$done) {
+    if ($INTERACTIVE) {
+        $filename = "";
+        $prompt = $files > 1 ? "File to add (RETURN when done) : " : "File to add : ";
+        while (!$filename && !$done) {
+            $filename = get_string $prompt;
+            if ($filename eq "" && $files > 1) {
+                print "Done!\n";
+                last;
+            };
+            $filename = "" unless -e $filename;
+        };
+    }
+    else {
+        $filename = shift;
+        last unless $filename;
+    };
+   last unless $filename;
+    $bbc_name = uc $filename;
+    $bbc_dir = uc $BBC_DIR;
+    if ($INTERACTIVE) {
+        $add_cr = y_or_n "Insert BBC line endings ? ";
+
+        $bbc_name =~ s/\./_/g;
+        if ($bbc_name =~ /^(.)\.(.{1,7})/) {
+            $bbc_dir = $1;
+            $bbc_name = $2;
+        };
+        $bbc_name = substr $bbc_name, 0, 7;
+        print "[ $bbc_name ] ";
+        $bbc_name = "";
+        while (!$bbc_name) {
+            $bbc_name = get_string "Filename on BBC disk : ";
+            if ($bbc_name =~ /^(.)\.(.{1,7})/) {
+                $bbc_dir = $1;
+                $bbc_name = $2;
+            };
+            $bbc_name = uc substr $bbc_name, 0, 7;
+        };
+    }
+    else {
+        $add_cr = $ADD_CR ? "y" : "n";
+        if ($bbc_name =~ /^(.)\.(.{1,7})/) {
+            $bbc_dir = $1;
+            $bbc_name = $2;
+        };
+        $bbc_name = substr $bbc_name, 0, 7;
+        print "$bbc_name\n";
+    };
+
+    # die "add CR: '$add_cr' ['$ADD_CR']";
+
+	$data = "";
+	open FH, "<", $filename;
+	while (read FH, $_, 4096) {
+		$data .= $_;
+	};
+	close FH;
+
+    if ($ADD_LINE_NO) {
+    	$data = add_line_numbers $data;
+    	# print "-" x 70, "\n";
+    	# print $data;
+    	# print "-" x 70, "\n";
+    	# die;
+    }
+
+	if ($add_cr =~ /y/i) {
+		$data =~ s/\n/\n\r/g;
+	}
+	else {
+	    warn "Not adding BBC line endings?!";
+	    #die "Not adding BBC line endings?!";
+	};
+
+	#  Pad out to sector (256 byte) boundary
+	$total_length = $length = length $data;
+	while ($total_length % 256) {
+		$data .= pack "C", 0;
+		++$total_length;
+	};
+
+	#  Don't ask for load and execution addresses if we altered the line
+	#  endings (which implies it was not a memory dump.)
+
+	if ($INTERACTIVE) {
+		$load = $add_cr ? "00000" : "";
+		while (!($load =~ /^[0-3]?[0-9a-f]{1,4}$/i)) {
+			$load = get_string "Load address : ";
+		};
+
+		$exec = $add_cr ? "00000" : "";
+		while (!($exec =~ /^[0-3]?[0-9a-f]{1,4}$/i)) {
+			$exec = get_string "Execution address : ";
+		};
+	}
+	else {
+		$load = $exec = "00000";
+	};
+
+	$load = hex $load;
+	$exec = hex $exec;
+
+	printf "File %2d is '%s'\n", $files, $bbc_name;
+	printf "Load address %05x -- Exec address %05x\n", $load, $exec;
+	printf "Length %05x -- starting sector %03x\n", $length, $sector;
+	printf "Total length %05x\n", $total_length;
+
+	#####  THIS IS THE FULL ATTRIBUTES OF THE FILE  #####
+
+	if ($files > 1) {       #  Move entire catalogue 8 bytes forwards
+		print "$files files. Moving catalogue.\n";
+		for ($i = $files * 8 + 7; $i >= 16; --$i) {
+			#printf "catalogue[%d] goes to [%d]  (%02x)\n", $i - 8, $i, $catalogue[$i - 8];
+			$catalogue[$i] = $catalogue[$i - 8];
+			#printf "catalogue[%d] goes to [%d]  (%02x)\n", $i + 256, $i + 248, $catalogue[$i + 256];
+			$catalogue[$i + 256] = $catalogue[$i + 248];
+		};
+		$catalogue[261] = 8 * $files;
+	};
+
+	#  Store the filename in bytes 8 to 14
+	$bbc_name .= " " x 8;
+	for ($i = 0; $i < 7; ++$i) {
+		$catalogue[$i + 8] = unpack "C", substr $bbc_name, $i, 1;
+	};
+	#  Store directory in byte 15
+	$catalogue[15] = unpack "C", substr $bbc_dir, 0, 1;
+
+	#  Load address
+	$catalogue[264] = $load & 0xff;
+	$catalogue[265] = (($load & 0xff00) >> 8) & 0xff;
+
+	#  Execution address
+	$catalogue[266] = $exec & 0xff;
+	$catalogue[267] = (($exec & 0xff00) >> 8) & 0xff;
+
+	#  Length
+	$catalogue[268] = $length & 0xff;
+	$catalogue[269] = (($length & 0xff00) >> 8) & 0xff;
+
+	#  High-order bits and starting sector
+	$catalogue[270] = (($exec & 0x30000) >> 10)
+					| (($length & 0x30000) >> 12)
+					| (($load & 0x30000) >> 14)
+					| (($sector & 0x300) >> 8);
+	$catalogue[271] = $sector & 0xff;
+
+	$sector += ($total_length & 0x3ff00) >> 8;
+
+	$data[$files++] = $data;
+	
+	#$done = TRUE;
+};
+
+##########################  BUILD UP THE  DISC IMAGE  ##########################
+
+--$files;   #  we increased it once too many
+$image = "";
+
+$image .= pack "C512", @catalogue;
+for ($i = 1; $i <= $files; ++$i) {
+    print "Adding file $i to image ...\n";
+    $image .= $data[$i];
+};
+
+$total_length = length $image;
+printf "Total length before rounding %05x\n", $total_length;
+while ($total_length % 256) {
+    $image .= pack "C", 0;
+    ++$total_length;
+};
+
+printf "Start on sector %03x -- Total length %05x\n", $sector, $total_length;
+
+open FH, ">", "image.dfs";
+print FH $image;
+close FH;
+
+exit;
