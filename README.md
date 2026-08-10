@@ -10,12 +10,72 @@ DFSBuster also incorporates the ability to detokenise a BBC BASIC program as sav
 * If either the load or execution address is &0000, the file is assumed to be text  (`*SPOOL` output or similar)  and the option is offered to replace BBC line endings with the host system's default line endings.
 * Otherwise the file is assumed to be data and written exactly as-is.
 
+# Usage
+
+`dfsls image_filename`
+
 If invoked by the name `dfsls` then the program edits immediately once
 the disc catalogue is displayed.
 
-If invoked with the option `-i`, then the program produces output in an
+`dfsbuster image_filename`
+
+Interactively extract files from the disc image.
+
+`dfsbuster OPTIONS image_filename`
+
+Various non-interactive ways to use the program, especially within scripts.
+
+## Interactive Operation
+
+If invoked from a terminal session with no options, just an image filename,
+the program will enter an interactive mode.  A catalogue of the files on the
+disc is displayed, with a number next to each one.  Entering a number at the
+prompt will extract the contents of the appropriate file to the host system.
+You will then be prompted for the host side file to write.
+
++ If the execution address of the file is between &8000 and &80FF, this could indicate a BASIC program; and the option will be presented to detokenise it, i.e. to render BASIC tokens as ASCII text.
++ If the load and/or execution address of the file is &0000, this could indicate a `*SPOOL` or similar text file; and the option will be presented to replace BBC Micro-style (CR or LF, CR) line endings with host system line endings.
++ Otherwise, the file contents will be passed through unchanged.
+
+To exit, press ENTER without typing a file number.
+
+## Non-Interactive Operation
+
+If invoked with the option `-l`  (mnemonic: **l**ist),  then the program behaves as though it
+had been invoked as `dfsls`.  The same behaviour will occur if either STDIN or STDOUT is
+not a terminal.
+
+If invoked with the option `-i`  (mnemonic: **i**nfo),  then the program produces output in an
 identical format to the output of the DFS command `*INFO *.*`.  This may
 be useful in Makefiles for multi-part assembler projects.
+
+If invoked with the option `-1`  (mnemonic: **1**-column),  then the program displays just the
+target-side filenames in a single column and exits.
+
+If invoked with the option `-g`  (mnemonic: **g**rep)  and a filename pattern, then the program
+displays the target-side filenames which match the pattern in one column
+and the disc image name in another column, then exits.
+
+(This output format should make it easy to do interesting things with `awk`.)
+
+If invoked with the option `-x`  (mnemonic: e**x**tract)  and a filename pattern, then the
+program extracts the contents of the first file matching the pattern.
+There are some additional options available when using -x as folllows:
+
+The `-o` option  (mnemonic: **o**utput_file)  additionally takes a filename, which will be
+used on the host for the extracted file.  If -o is absent, then the DFS
+filename will be used almost verbatim; files in directory **$** will have
+the `$.` stripped, but files in any other directory will retain their
+directory prefixes.  The special output filename **-** extracts to STDOUT.
+
+The `-r`, `-t` and `-b` options  (mnemonics: **r**aw, **t**ext, **b**asic)  can be used to
+force a particular translation mode, as folllows:
+raw  (no translation), text  (replaces CR or LF, CR with LF, for
+editing text files on the host system)  or BASIC  (detokenises
+BASIC programs to text representation, like using `*SPOOL F.ILE`
+followed by `LIST`).  If all are absent, then the translation mode will
+be determined automatically based on the file's load and execution
+addresses, as in interactive mode.
 
 ## History
 
