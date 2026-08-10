@@ -12,10 +12,19 @@ use Data::Dumper;
 $| = TRUE;
 
 my %OPTIONS;
-getopts "1il", \%OPTIONS;
+getopts "1bfg:hilo:rtx:", \%OPTIONS;
 my $ONE_COL  = $OPTIONS{"1"};
+my $BASIC    = $OPTIONS{"b"};
+my $FORCE    = $OPTIONS{"f"};
+my $GREP     = $OPTIONS{"g"};
+my $HELP     = $OPTIONS{"h"};
 my $INFO     = $OPTIONS{"i"};
 my $IS_DFSLS = $OPTIONS{"l"} || ($0 =~ /dfsls/) || $ONE_COL;
+my $OUT_FILE = $OPTIONS{"o"};
+my $RAW      = $OPTIONS{"r"};
+my $TEXT     = $OPTIONS{"t"};
+my $EXTRACT  = $OPTIONS{"x"};
+my $IS_TTY   = -t STDIN && -t STDOUT;
 
 my $image_filename = "bbcpcb2.bbc";
 my (@catalogue, @filename, @load, @length, @exec, @sector);
@@ -23,7 +32,7 @@ my ($writes, $files, $boot_mode, $sectors);
 my $image_data = "";
 my $catalogue = "";
 my $title = "";
-my ($done, $filename, $filename_ok, $i, $f, $yn, $data);
+my ($done, $filename, $filename_ok, $i, $f, $yn, $data, $warning);
 my ($beeb_filename, $load_addr, $exec_addr, $length);
 
 my @boot_mode = ("Not bootable", "*LOAD", "*RUN", "*EXEC");
@@ -197,7 +206,7 @@ sub read_catalogue {
     $writes    = ($catalogue[260] & 0xf) + 10 * (($catalogue[260] & 0xf0) >> 4);
     $files     = ($catalogue[261] & 0xf8) >> 3;
     $boot_mode = ($catalogue[262] & 0x30) >> 4;
-    $sectors   = $catalogue[263] + ($catalogue[263] & 0x3) << 8;
+    $sectors   = $catalogue[263] + (($catalogue[262] & 0x3) << 8);
 
     $done = FALSE;
     $f = 1;
@@ -240,6 +249,11 @@ sub display_all_info {
         printf "%-15s %06X %06X %06X %03X\n", $filename[$f], $load[$f], $exec[$f], $length[$f], $sector[$f];
     };
 };  #  display_all_info
+
+sub file_info {
+    my $f = shift;      #  file number within catalogue
+    ($filename[$f], $load[$f], $exec[$f], $length[$f]);
+};  #  file_info
 
 sub display_file_info {
     my $f = shift;      #  file number within catalogue
@@ -349,89 +363,190 @@ sub write_host_file {
 
 ##########################  END FUNCTION DEFINITIONS  ##########################
 
-$image_filename = shift if @ARGV;
+if ($HELP) {
+    my $prog = $0;
+    $prog =~ s|^.*/||;
+    print STDERR <<"_STOP_";
+Usage: $prog [OPTIONS] filename
 
-read_catalogue $image_filename;
-
-$done = FALSE;
-
-if ($INFO) {
-    # display_all_info;
-    for ($f = 1; $f <= $files; ++$f) {
-        printf "%-15s %06X %06X %06X %03X\n", $filename[$f], $load[$f], $exec[$f], $length[$f], $sector[$f];
-    };
-    $done = TRUE;
+OPTIONS:
+  -1           List files one per line and exit
+  -i           Produces machine-parsable output like *INFO
+  -g  PATTERN  Grep for PATTERN among files in image
+  -l           Just list files and exit
+  -h           Display this help and exit
+  
+OUTPUT:
+With -i:
+F.ILENAME      LD_ADD EX_ADD LENGTH STS
+With -g:  (only outputs matches)
+F.ILENAME      image_file
+_STOP_
+    exit 1;
 };
 
-if ($ONE_COL) {
-    for ($f = 1; $f <= $files; ++$f) {
-        printf "%s\n", $filename[$f];
-    };
-    $done = TRUE;
-};
+while (@ARGV) {
+    $image_filename = shift;
+    read_catalogue $image_filename;
+    $done = FALSE;
 
-while (!$done) {
-    display_catalogue;
-   last if $IS_DFSLS;
-    $f = 0;
-    while (!$done && ($f < 1 || $f > $files)) {
-        print "Select file : ";
-        $_ = <>;
-        if (/(\d+)/) {
-            $f = $1;
-        };
-        if (/^$/) {
-            $done = TRUE;
-        };
-    };
-
-    if (!$done) {
-        ($beeb_filename, $load_addr, $exec_addr, $length) = display_file_info $f;
-
-        $filename_ok = FALSE;
-        
-        while (!$filename_ok) {
-            print "Enter filename to write : ";
-            $_ = <>;
-            if (/(\S+)/) {
-                $filename = $1;
-            };
-        
-            if (-e $filename) {
-                $yn = y_or_n "File exists! Overwrite? ";
-                $filename_ok = ($yn =~ /y/i);
-            }
-            else {
-                $filename_ok = TRUE;
+    if ($GREP) {
+        my $regexp = $GREP;
+        my $shown_title = FALSE;
+        $regexp =~ s/\*/.*/g;
+        for ($f = 1; $f <= $files; ++$f) {
+            if ($filename[$f] =~ /$regexp/i) {
+                printf "%-15s %s\n", $filename[$f], $image_filename;
             };
         };
-        
-        if ($filename) {
-            $data = target_file $f;
+        $done = TRUE;
+    };
 
-            #  Optionally mung the file in various ways
+    # if ($EXTRACT) {
+    #     printf "*****  EXTRACTING  \"%s\"  *****\n", $EXTRACT;
+    #     my $regexp = $EXTRACT;
+    #     my $shown_title = FALSE;
+    #     $regexp =~ s/\*/.*/g;
+    #     for ($f = 1; $f <= $files; ++$f) {
+    #         if ($filename[$f] =~ /$regexp/i) {
+    #             printf "%-15s %s\n", $filename[$f], $image_filename;
+    #         };
+    #     };
+    #     # $done = TRUE;
+    # };
 
-            #  BASIC programs have exec=&8023 (ModB) or &802A (M128)
+    if ($INFO) {
+        # display_all_info;
+        for ($f = 1; $f <= $files; ++$f) {
+            printf "%-15s %06X %06X %06X %03X\n", $filename[$f], $load[$f], $exec[$f], $length[$f], $sector[$f];
+        };
+        $done = TRUE;
+    };
 
-            printf "Exec address =&%05X\n", $exec_addr;
-            if (($exec_addr & 0xffff) >= 0x8000 && ($exec_addr & 0xffff) <= 0x80ff) {
-                $yn = y_or_n "Detokenise? ";
-                if ($yn =~ /y/i) {
+    if ($ONE_COL) {
+        for ($f = 1; $f <= $files; ++$f) {
+            printf "%s\n", $filename[$f];
+        };
+        $done = TRUE;
+    };
+
+    if ($EXTRACT) {
+        # printf "*****  EXTRACT IS ON, LOOKING FOR \"%s\"  *****\n", $EXTRACT;
+        my $regexp = $EXTRACT;
+        my $shown_title = FALSE;
+        $regexp =~ s/\*/.*/g;
+        for ($f = 1; $f <= $files; ++$f) {
+            if ($filename[$f] =~ /$regexp/i) {
+                $beeb_filename = $filename[$f];
+                $load_addr = $load[$f];
+                $exec_addr = $exec[$f];
+                $length = $length[$f];
+                # printf "%-15s %s\n", $filename[$f], $image_filename;
+                if (defined $OUT_FILE) {
+                    printf "Output filename is '%s'\n", $OUT_FILE;
+                    $filename = $OUT_FILE;
+                }
+                else {
+                    $filename = $beeb_filename;
+                    # printf "Saving '%s' ", $filename;
+                    $filename =~ s/^\s*|\s*$//g;
+                    $filename =~ s/\$\.//;
+                    # printf "as '%s'\n", $filename;
+                };
+                # printf "*****  EXTRACTING \"%s\" TO HOST AS \"%s\"\n", $filename[$f], $filename;
+                $data = target_file $f;
+
+                #  BASIC programs have exec=&8023 (ModB) or &802A (M128)
+                if ((($exec_addr & 0xffff) >= 0x8000 && ($exec_addr & 0xffff) <= 0x80ff && !$RAW) || $BASIC) {
+                    $warning = sprintf "Detokenising %s", $beeb_filename;
                     $data = detokenise $data;
                 }
-            }
-            #  Load address=&0000 probably is a *SPOOL file
-            elsif (($load_addr & 0xffff) == 0 || ($exec_addr & 0xffff) == 0) {
-                $yn = y_or_n "Remove BBC line endings? ";
-                if ($yn =~ /y/i) {
+                #  Load address=&0000 probably is a *SPOOL file
+                elsif ((($load_addr & 0xffff) == 0 || ($exec_addr & 0xffff) == 0 || $TEXT) && !$RAW) {
+                    $warning = sprintf "De-beebifying line endings of %s", $beeb_filename;
                     $data =~ s/\n\r/\n/g;
+                };
+                
+                if (-e $filename && !$FORCE) {
+                    die "$filename already exists";
+                }
+                else {
+                    warn $warning if $warning;
+                    if (!$filename || $filename =~ /^-$/) {
+                        print $data;
+                    }
+                    else {
+                        write_host_file $filename, $data;
+                    };
+                };
+            };
+        };
+        # $done = TRUE;
+    }
+    else {
+        while (!$done) {
+            display_catalogue;
+           last if $IS_DFSLS || !$IS_TTY;
+            $f = 0;
+            while (!$done && ($f < 1 || $f > $files)) {
+                print "Select file : ";
+                $_ = <>;
+                if (/(\d+)/) {
+                    $f = $1;
+                };
+                if (/^$/) {
+                    $done = TRUE;
                 };
             };
 
-            write_host_file $filename, $data;
+            if (!$done) {
+                ($beeb_filename, $load_addr, $exec_addr, $length) = display_file_info $f;
+
+                $filename_ok = FALSE;
+                while (!$filename_ok) {
+                    print "Enter filename to write : ";
+                    $_ = <>;
+                    if (/(\S+)/) {
+                        $filename = $1;
+                    };
+                
+                    if (-e $filename) {
+                        $yn = y_or_n "File exists! Overwrite? ";
+                        $filename_ok = ($yn =~ /y/i);
+                    }
+                    else {
+                        $filename_ok = TRUE;
+                    };
+                };
+            
+                if ($filename) {
+                    $data = target_file $f;
+
+                    #  Optionally mung the file in various ways
+
+                    #  BASIC programs have exec=&8023 (ModB) or &802A (M128)
+
+                    printf "Exec address =&%05X\n", $exec_addr;
+                    if (($exec_addr & 0xffff) >= 0x8000 && ($exec_addr & 0xffff) <= 0x80ff) {
+                        $yn = y_or_n "Detokenise? ";
+                        if ($yn =~ /y/i) {
+                            $data = detokenise $data;
+                        }
+                    }
+                    #  Load address=&0000 probably is a *SPOOL file
+                    elsif (($load_addr & 0xffff) == 0 || ($exec_addr & 0xffff) == 0) {
+                        $yn = y_or_n "Remove BBC line endings? ";
+                        if ($yn =~ /y/i) {
+                            $data =~ s/\n\r/\n/g;
+                        };
+                    };
+
+                    write_host_file $filename, $data;
+                };
+                #$done = TRUE;
+            };
         };
-        #$done = TRUE;
     };
 };
-        
+
 exit;
