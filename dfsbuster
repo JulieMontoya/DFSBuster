@@ -12,9 +12,12 @@ use Data::Dumper;
 $| = TRUE;
 
 my %OPTIONS;
-getopts "1bfg:hilo:rtx:", \%OPTIONS;
+getopts "18bdfg:hilo:rtx:", \%OPTIONS;
 my $ONE_COL  = $OPTIONS{"1"};
+my $COLS     = $OPTIONS{"8"} ? 8 : 16;
+my $DIGITS   = $OPTIONS{"8"} ? 4 : 5;
 my $BASIC    = $OPTIONS{"b"};
+my $DUMP     = $OPTIONS{"d"};
 my $FORCE    = $OPTIONS{"f"};
 my $GREP     = $OPTIONS{"g"};
 my $HELP     = $OPTIONS{"h"};
@@ -374,12 +377,20 @@ OPTIONS:
   -i           Produces machine-parsable output like *INFO
   -g  PATTERN  Grep for PATTERN among files in image
   -l           Just list files and exit
+  -x PATTERN [-b|-r|-t] [-o OUTFILE]
+               Extract file matching PATTERN to OUTFILE
+               (without -o, uses DFS filename; -o- extracts to STDOUT)
+               (without -b|-r|-t, attempts to guess mode)
+  -r           Raw mode  (makes no changes)
+  -b           BASIC mode  (detokenises BASIC programs)
+  -t           Text mode  (translates BBC Micro \\n?\\r to \\n)
   -h           Display this help and exit
   
 OUTPUT:
 With -i:
-F.ILENAME      LD_ADD EX_ADD LENGTH STS
-With -g:  (only outputs matches)
+F.ILENAME      LD_ADD EX_ADD LENGTH ST_SEC
+               (Same as *INFO on BBC Micro)
+With -g:  (only outputs matches; awk-friendly output)
 F.ILENAME      image_file
 _STOP_
     exit 1;
@@ -437,46 +448,88 @@ while (@ARGV) {
         $regexp =~ s/\*/.*/g;
         for ($f = 1; $f <= $files; ++$f) {
             if ($filename[$f] =~ /$regexp/i) {
-                $beeb_filename = $filename[$f];
-                $load_addr = $load[$f];
-                $exec_addr = $exec[$f];
-                $length = $length[$f];
-                # printf "%-15s %s\n", $filename[$f], $image_filename;
-                if (defined $OUT_FILE) {
-                    printf "Output filename is '%s'\n", $OUT_FILE;
-                    $filename = $OUT_FILE;
+                ($beeb_filename, $load_addr, $exec_addr, $length) = file_info $f;
+                if ($DUMP) {
+                    if ($OUT_FILE) {
+                        open OFH, ">", $OUT_FILE or die "Could not open $OUT_FILE for writing:$!";
+                        select OFH;
+                    };
+                    $data = target_file $f;
+                    my $addr = $load_addr;
+                    $addr &= 0xffff if $DIGITS == 4;
+                    my $c = 0;
+                    my $chars = "";
+                    printf " %0${DIGITS}X", $addr;
+                    foreach (split //, $data) {
+                        if ($c >= $COLS) {
+                            printf " %s\n %0${DIGITS}X", $chars, $addr;
+                            $chars = "";
+                            $c = 0;
+                        };
+                        printf " %02X", ord $_;
+                        if ($_ ge " " && $_ le "~") {
+                            $chars .= $_;
+                        }
+                        else {
+                            $chars .= ".";
+                        };
+                        ++$addr;
+                        ++$c;
+                    };
+                    if ($c < $COLS) {
+                        foreach ($c .. $COLS - 1) {
+                            print " --";
+                            $chars .= " ";
+                        };
+                    };
+                    printf " %s\n", $chars;
+                    if ($OUT_FILE) {
+                        select STDOUT;
+                        close OFH;
+                    };
                 }
-                else {
-                    $filename = $beeb_filename;
-                    # printf "Saving '%s' ", $filename;
-                    $filename =~ s/^\s*|\s*$//g;
-                    $filename =~ s/\$\.//;
-                    # printf "as '%s'\n", $filename;
-                };
-                # printf "*****  EXTRACTING \"%s\" TO HOST AS \"%s\"\n", $filename[$f], $filename;
-                $data = target_file $f;
-
-                #  BASIC programs have exec=&8023 (ModB) or &802A (M128)
-                if ((($exec_addr & 0xffff) >= 0x8000 && ($exec_addr & 0xffff) <= 0x80ff && !$RAW) || $BASIC) {
-                    $warning = sprintf "Detokenising %s", $beeb_filename;
-                    $data = detokenise $data;
-                }
-                #  Load address=&0000 probably is a *SPOOL file
-                elsif ((($load_addr & 0xffff) == 0 || ($exec_addr & 0xffff) == 0 || $TEXT) && !$RAW) {
-                    $warning = sprintf "De-beebifying line endings of %s", $beeb_filename;
-                    $data =~ s/\n\r/\n/g;
-                };
-                
-                if (-e $filename && !$FORCE) {
-                    die "$filename already exists";
-                }
-                else {
-                    warn $warning if $warning;
-                    if (!$filename || $filename =~ /^-$/) {
-                        print $data;
+                else {                        
+                    # $beeb_filename = $filename[$f];
+                    # $load_addr = $load[$f];
+                    # $exec_addr = $exec[$f];
+                    # $length = $length[$f];
+                    # printf "%-15s %s\n", $filename[$f], $image_filename;
+                    if (defined $OUT_FILE) {
+                        printf "Output filename is '%s'\n", $OUT_FILE;
+                        $filename = $OUT_FILE;
                     }
                     else {
-                        write_host_file $filename, $data;
+                        $filename = $beeb_filename;
+                        # printf "Saving '%s' ", $filename;
+                        $filename =~ s/^\s*|\s*$//g;
+                        $filename =~ s/\$\.//;
+                        # printf "as '%s'\n", $filename;
+                    };
+                    # printf "*****  EXTRACTING \"%s\" TO HOST AS \"%s\"\n", $filename[$f], $filename;
+                    $data = target_file $f;
+
+                    #  BASIC programs have exec=&8023 (ModB) or &802A (M128)
+                    if ((($exec_addr & 0xffff) >= 0x8000 && ($exec_addr & 0xffff) <= 0x80ff && !$RAW) || $BASIC) {
+                        $warning = sprintf "Detokenising %s", $beeb_filename;
+                        $data = detokenise $data;
+                    }
+                    #  Load address=&0000 probably is a *SPOOL file
+                    elsif ((($load_addr & 0xffff) == 0 || ($exec_addr & 0xffff) == 0 || $TEXT) && !$RAW) {
+                        $warning = sprintf "De-beebifying line endings of %s", $beeb_filename;
+                        $data =~ s/\n\r/\n/g;
+                    };
+                    
+                    if (-e $filename && !$FORCE) {
+                        die "$filename already exists";
+                    }
+                    else {
+                        warn $warning if $warning;
+                        if (!$filename || $filename =~ /^-$/) {
+                            print $data;
+                        }
+                        else {
+                            write_host_file $filename, $data;
+                        };
                     };
                 };
             };
@@ -500,48 +553,81 @@ while (@ARGV) {
             };
 
             if (!$done) {
-                ($beeb_filename, $load_addr, $exec_addr, $length) = display_file_info $f;
-
-                $filename_ok = FALSE;
-                while (!$filename_ok) {
-                    print "Enter filename to write : ";
-                    $_ = <>;
-                    if (/(\S+)/) {
-                        $filename = $1;
-                    };
-                
-                    if (-e $filename) {
-                        $yn = y_or_n "File exists! Overwrite? ";
-                        $filename_ok = ($yn =~ /y/i);
-                    }
-                    else {
-                        $filename_ok = TRUE;
-                    };
-                };
-            
-                if ($filename) {
+                if ($DUMP) {
+                    ($beeb_filename, $load_addr, $exec_addr, $length) = file_info $f;
                     $data = target_file $f;
-
-                    #  Optionally mung the file in various ways
-
-                    #  BASIC programs have exec=&8023 (ModB) or &802A (M128)
-
-                    printf "Exec address =&%05X\n", $exec_addr;
-                    if (($exec_addr & 0xffff) >= 0x8000 && ($exec_addr & 0xffff) <= 0x80ff) {
-                        $yn = y_or_n "Detokenise? ";
-                        if ($yn =~ /y/i) {
-                            $data = detokenise $data;
+                    my $addr = $load_addr;
+                    $addr &= 0xffff if $DIGITS == 4;
+                    my $c = 0;
+                    my $chars = "";
+                    printf " %0${DIGITS}X", $addr;
+                    foreach (split //, $data) {
+                        if ($c >= $COLS) {
+                            printf " %s\n %0${DIGITS}X", $chars, $addr;
+                            $chars = "";
+                            $c = 0;
+                        };
+                        printf " %02X", ord $_;
+                        if ($_ ge " " && $_ le "~") {
+                            $chars .= $_;
                         }
-                    }
-                    #  Load address=&0000 probably is a *SPOOL file
-                    elsif (($load_addr & 0xffff) == 0 || ($exec_addr & 0xffff) == 0) {
-                        $yn = y_or_n "Remove BBC line endings? ";
-                        if ($yn =~ /y/i) {
-                            $data =~ s/\n\r/\n/g;
+                        else {
+                            $chars .= ".";
+                        };
+                        ++$addr;
+                        ++$c;
+                    };
+                    if ($c < $COLS) {
+                        foreach ($c .. $COLS - 1) {
+                            print " --";
+                            $chars .= " ";
                         };
                     };
+                    printf " %s\n", $chars;
+                }
+                else {
+                    ($beeb_filename, $load_addr, $exec_addr, $length) = display_file_info $f;
+                    $filename_ok = FALSE;
+                    while (!$filename_ok) {
+                        print "Enter filename to write : ";
+                        $_ = <>;
+                        if (/(\S+)/) {
+                            $filename = $1;
+                        };
+                    
+                        if (-e $filename) {
+                            $yn = y_or_n "File exists! Overwrite? ";
+                            $filename_ok = ($yn =~ /y/i);
+                        }
+                        else {
+                            $filename_ok = TRUE;
+                        };
+                    };
+                
+                    if ($filename) {
+                        $data = target_file $f;
 
-                    write_host_file $filename, $data;
+                        #  Optionally mung the file in various ways
+
+                        #  BASIC programs have exec=&8023 (ModB) or &802A (M128)
+
+                        printf "Exec address =&%05X\n", $exec_addr;
+                        if (($exec_addr & 0xffff) >= 0x8000 && ($exec_addr & 0xffff) <= 0x80ff) {
+                            $yn = y_or_n "Detokenise? ";
+                            if ($yn =~ /y/i) {
+                                $data = detokenise $data;
+                            }
+                        }
+                        #  Load address=&0000 probably is a *SPOOL file
+                        elsif (($load_addr & 0xffff) == 0 || ($exec_addr & 0xffff) == 0) {
+                            $yn = y_or_n "Remove BBC line endings? ";
+                            if ($yn =~ /y/i) {
+                                $data =~ s/\n\r/\n/g;
+                            };
+                        };
+
+                        write_host_file $filename, $data;
+                    };
                 };
                 #$done = TRUE;
             };
