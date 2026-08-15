@@ -76,10 +76,12 @@ column; then exits.
 (This output format should make it easy to do interesting things with
 `awk`.)
 
+### Extracting files
+
 If invoked with the option `-x`  (mnemonic: e**x**tract)  and a
 filename pattern, then the program extracts the contents of the first
 file matching the pattern.  There are some additional options available
-when using -x as folllows:
+when using -x as follows:
 
 The `-o` option  (mnemonic: **o**utput_file)  additionally takes a
 filename, which will be used on the host for the extracted file.  If -o
@@ -93,11 +95,63 @@ The `-r`, `-t` and `-b` options  (mnemonics: **r**aw, **t**ext,
 follows: raw  (no translation), text  (replaces CR or LF, CR with LF,
 for editing text files on the host system)  or BASIC  (detokenises
 BASIC programs to text representation, like using `*SPOOL F.ILE`
-followed by `LIST`).  If all are absent, then the translation mode
-will be determined automatically based on the file's load and
-execution addresses, as in interactive mode.
+followed by `LIST`).
 
-## History
+### Hex dumping files
+
+The `-d` option  (mnemonic: **d**ump)  extracts the file contents as a
+hex dump.  Note that if `o` is not used, rather than using the target
+filename, the output will be displayed on STDOUT.
+
+The `-8` option  (mnemonic: **8** columns)  causes the hex dump data
+to consist of rows of eight characters, with 16-bit addresses; this
+fits into 40 columns, matching typical BBC Micro output.
+
+### Extracting graphics files
+
+The `-m` option  (mnemonic: **m**ode)  additionally takes an integer
+between 0 and 6 inclusive, and treats the target-side file as a
+`*SAVE`d copy of the BBC Micro's screen memory from within that graphics
+MODE.  The output file will be a `.png` image of the BBC Micro's screen,
+of size 320 * 256 _except_ for MODEs 0 and 3, which will always be
+640 * 512.  MODEs 3 and 6 include black scanlines between text rows.
+The flashing colours are rendered as 25% grey for 8, and 50% brightness
+versions of the steady colour whose number is 8 smaller for 9 to 15.
+
+The `-L` option  (mnemonic: **L**arge)  produces an image of size
+640 * 512 for modes 1, 2, 4, 5 and 6.
+
+If none of `-r`, `-t`, `-b`, `-d` or `-m` is present, then the "text"
+or "detokenise" translation mode may be selected automatically based on
+the file's load and execution addresses, as in interactive mode; or
+else the output will be in raw format.  Hex and graphics dumps must be
+selected explicitly.
+
+## Examples
+
+`$ dfsbuster -i birthday.ssd`
+
+Produces an equivalent output to `*INFO *.*` from the disc image
+`birthday.ssd`.
+
+`$ dfsbuster -x MENU -o menu.bas -b bcp_utils.ssd`
+
+Extracts the BASIC program `$.MENU` from the disc image `utils.ssd`,
+detokenises it and saves the resulting plain text file as `menu.bas`.
+
+`$ dfsbuster -x MENU -o - -b bcp_utils.ssd`
+
+Extracts the BASIC program `$.MENU` from the disc image `utils.ssd`,
+detokenises it and displays the resulting plain text on screen.  This
+is equivalent to `LIST` in BBC BASIC.
+
+`$ dfsbuster -x S.AMP1 -m 1 -L -o bcp_amp1.png bcp_work1.ssd`
+
+Extracts the file `S.AMP1` from the disc image `bcp_work1.ssd` as a
+saved MODE 1 screen  (`*SAVE S.AMP1 3000 8000`),  with the output
+filename `bcp_amp1.png`, and a size of 640 * 512.
+
+# History
 
 DFS was the BBC Micro's Disk Filing System, and seems to be a
 descendant of the Acorn System DFS.  It uses a very simple disk

@@ -2,6 +2,7 @@
 use strict;
 use constant { TRUE => 1, FALSE => "" };
 use Getopt::Std;
+use GD;
 use Data::Dumper;
 
 # NO RIGHTS RESERVED. THIS CODE IS DEDICATED TO THE PUBLIC DOMAIN.
@@ -12,10 +13,10 @@ use Data::Dumper;
 $| = TRUE;
 
 my %OPTIONS;
-getopts "18bdfg:hilo:rtx:", \%OPTIONS;
+getopts "18bdfg:hiLlm:o:rtx:", \%OPTIONS;
 my $ONE_COL  = $OPTIONS{"1"};
 my $COLS     = $OPTIONS{"8"} ? 8 : 16;
-my $DIGITS   = $OPTIONS{"8"} ? 4 : 5;
+my $DIGITS   = $OPTIONS{"8"} ? 4 : 8;
 my $BASIC    = $OPTIONS{"b"};
 my $DUMP     = $OPTIONS{"d"};
 my $FORCE    = $OPTIONS{"f"};
@@ -23,7 +24,10 @@ my $GREP     = $OPTIONS{"g"};
 my $HELP     = $OPTIONS{"h"};
 my $INFO     = $OPTIONS{"i"};
 my $IS_DFSLS = $OPTIONS{"l"} || ($0 =~ /dfsls/) || $ONE_COL;
+my $LARGE    = $OPTIONS{"L"} || 0;
+my $GFX_MODE = $OPTIONS{"m"};
 my $OUT_FILE = $OPTIONS{"o"};
+my $PALETTE  = $OPTIONS{"p"};
 my $RAW      = $OPTIONS{"r"};
 my $TEXT     = $OPTIONS{"t"};
 my $EXTRACT  = $OPTIONS{"x"};
@@ -36,7 +40,7 @@ my $image_data = "";
 my $catalogue = "";
 my $title = "";
 my ($done, $filename, $filename_ok, $i, $f, $yn, $data, $warning);
-my ($beeb_filename, $load_addr, $exec_addr, $length);
+my ($beeb_filename, $load_addr, $exec_addr, $length, $write);
 
 my @boot_mode = ("Not bootable", "*LOAD", "*RUN", "*EXEC");
 
@@ -169,6 +173,31 @@ my %TOKENS = ( 128 => "AND",
                254 => "WIDTH",
                255 => "OSCLI" );
 
+my @colours = ( 0x000000, 0xff0000, 0x00ff00, 0xffff00,
+                0x0000ff, 0x00ffff, 0xff00ff, 0xffffff,
+                0x404040, 0x800000, 0x008000, 0x808000,
+                0x000080, 0x008080, 0x800080, 0x808080 );
+
+my %palette = (  2 => [ 0, 7 ],
+                 4 => [ 0, 1, 3, 7 ],
+                16 => [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 ] );
+
+#                    wid  ht   nc nb pw  ph  cw  ch  rd_pix_sub    wr_pix_sub
+my @gfx_mode = ( [ [ 640, 512,  2, 8, 1, 2,  8, 16, \&rd_pix_2c,  \&wr_pix_640  ],   # 0
+                   [ 640, 512,  2, 8, 1, 2,  8, 16, \&rd_pix_2c,  \&wr_pix_640  ] ],
+                 [ [ 320, 256,  4, 4, 1, 1,  4,  8, \&rd_pix_4c,  \&wr_pix_320s ],   # 1
+                   [ 640, 512,  4, 4, 2, 2,  8, 16, \&rd_pix_4c,  \&wr_pix_320l ] ],
+                 [ [ 320, 256, 16, 2, 2, 1,  4,  8, \&rd_pix_16c, \&wr_pix_160s ],   # 2
+                   [ 640, 512, 16, 2, 4, 2,  8, 16, \&rd_pix_16c, \&wr_pix_160l ] ],
+                 [ [ 640, 512,  2, 8, 2, 2,  8,  8, \&rd_pix_2c,  \&wr_pix_640  ],   # 3
+                   [ 640, 512,  2, 8, 2, 2,  8,  8, \&rd_pix_2c,  \&wr_pix_640  ] ],
+                 [ [ 320, 256,  2, 8, 1, 1,  8,  8, \&rd_pix_2c,  \&wr_pix_320s ],   # 4
+                   [ 640, 512,  2, 8, 2, 2, 16, 16, \&rd_pix_4c,  \&wr_pix_320l ] ],
+                 [ [ 320, 256,  4, 4, 2,  1, 8,  8, \&rd_pix_4c,  \&wr_pix_160s ],   # 5
+                   [ 640, 512,  4, 4, 4, 2, 16, 16, \&rd_pix_4c,  \&wr_pix_160l ] ],
+                 [ [ 320, 256,  2, 8, 1, 1,  8, 10, \&rd_pix_2c,  \&wr_pix_320s ],   # 6
+                   [ 640, 512,  2, 8, 2, 2, 16, 20, \&rd_pix_4c,  \&wr_pix_320l ] ] );
+                   
 #########################  BEGIN FUNCTION DEFINITIONS  #########################
 
 sub nul2spc {
@@ -356,6 +385,115 @@ sub detokenise {
     $basic;
 };  #  detokenise
 
+sub hex_dump {
+    my $data = shift;
+    my $addr = shift;
+    $addr &= 0xffff if $DIGITS == 4;
+    my $c = 0;
+    my $chars = "";
+    my $output = sprintf " %0${DIGITS}X", $addr;
+    foreach (split //, $data) {
+        if ($c >= $COLS) {
+            $output .= sprintf " %s\n %0${DIGITS}X", $chars, $addr;
+            $chars = "";
+            $c = 0;
+        };
+        $output .= sprintf " %02X", ord $_;
+        if ($_ ge " " && $_ le "~") {
+            $chars .= $_;
+        }
+        else {
+            $chars .= ".";
+        };
+        ++$addr;
+        ++$c;
+    };
+    if ($c < $COLS) {
+        foreach ($c .. $COLS - 1) {
+            $output .= " --";
+            $chars .= " ";
+        };
+    };
+    $output .= sprintf " %s\n", $chars;
+};  #  hex_dump
+
+sub wr_pix_640 {
+    my ($screen, $x, $y, $c) = @_;
+    $screen->setPixel($x, $y, $c);
+    $screen->setPixel($x, $y + 1, $c);
+};
+
+sub wr_pix_320l {
+    my ($screen, $x, $y, $c) = @_;
+    $screen->filledRectangle($x, $y, $x + 1, $y + 1, $c);
+};
+
+sub wr_pix_320s {
+    my ($screen, $x, $y, $c) = @_;
+    $screen->setPixel($x, $y, $c);
+};
+
+sub wr_pix_160l {
+    my ($screen, $x, $y, $c) = @_;
+    $screen->filledRectangle($x, $y, $x + 3, $y + 1, $c);
+};
+
+sub wr_pix_160s {
+    my ($screen, $x, $y, $c) = @_;
+    $screen->setPixel($x, $y, $c);
+    $screen->setPixel($x + 1, $y, $c);
+};
+
+sub rd_pix_16c {
+    my ($byte, $pos) = @_;
+    my $b1 = $byte >> (1 - $pos);
+    (($b1 & 0x40) >> 3) | (($b1 & 0x10) >> 2) | (($b1 & 0x4) >> 1) | ($b1 & 0x01);
+};
+
+sub rd_pix_4c {
+    my ($byte, $pos) = @_;
+    my $b1 = $byte >> (3 - $pos);
+    (($b1 & 0x10) >> 3) | ($b1 & 0x01);
+};
+
+sub rd_pix_2c {
+    my ($byte, $pos) = @_;
+    my $b1 = $byte >> (7 - $pos);
+    $b1 & 0x01;
+};
+
+sub graphics_dump {
+    my $mode = shift;
+    my $large = shift || 0;
+    my $data = shift;
+    my ($width, $height, $colours, $bits, $pix_w, $pix_h, $cell_w, $cell_h, $rd_pix, $wr_pix)
+        = @{$gfx_mode[$mode][$large]};        
+    my $screen = GD::Image->new($width, $height, TRUE);
+    my $x = 0;
+    my $y = 0;
+    my $scanline = 0;
+    my ($byte, $bit, $c);
+
+    foreach (split //, $data) {
+        $byte = ord $_;
+        for ($bit = 0; $bit < $bits; ++$bit) {
+            $c = &$rd_pix($byte, $bit);
+            &$wr_pix($screen, $x + $pix_w * $bit, $y + $pix_h * $scanline,
+                     $colours[$palette{$colours}[$c]]);
+        };
+        ++$scanline;
+        if ($scanline > 7) {
+            $scanline = 0;
+            $x += $cell_w;
+        };
+        if ($x >= $width) {
+            $x = 0;
+            $y += $cell_h;
+        };
+    };
+    $screen;
+};  #  graphics_dump
+
 sub write_host_file {
     my $host_filename = shift;
     my $data = shift;
@@ -375,21 +513,23 @@ Usage: $prog [OPTIONS] filename
 OPTIONS:
   -1           List files one per line and exit
   -i           Produces machine-parsable output like *INFO
-  -g  PATTERN  Grep for PATTERN among files in image
+  -g PATTERN   Search  (grep)  for PATTERN among files in image
   -l           Just list files and exit
-  -x PATTERN [-b|-r|-t] [-o OUTFILE]
+  -x PATTERN [-r|-b|-t|-d|-m N] [-o OUTFILE]
                Extract file matching PATTERN to OUTFILE
-               (without -o, uses DFS filename; -o- extracts to STDOUT)
-               (without -b|-r|-t, attempts to guess mode)
+               (without -o, uses DFS filename; -o- to extract to STDOUT)
+               (without -r|-b|-t|m, attempts to guess mode)
   -r           Raw mode  (makes no changes)
   -b           BASIC mode  (detokenises BASIC programs)
   -t           Text mode  (translates BBC Micro \\n?\\r to \\n)
+  -m 0..6      Convert MODE N graphics memory file to .png
+  -d [ -8 ]    Hex dump; usually 16 chars/line, -8 uses 8 chars
   -h           Display this help and exit
   
 OUTPUT:
 With -i:
 F.ILENAME      LD_ADD EX_ADD LENGTH ST_SEC
-               (Same as *INFO on BBC Micro)
+               (Same as *INFO *.* in DFS)
 With -g:  (only outputs matches; awk-friendly output)
 F.ILENAME      image_file
 _STOP_
@@ -412,19 +552,6 @@ while (@ARGV) {
         };
         $done = TRUE;
     };
-
-    # if ($EXTRACT) {
-    #     printf "*****  EXTRACTING  \"%s\"  *****\n", $EXTRACT;
-    #     my $regexp = $EXTRACT;
-    #     my $shown_title = FALSE;
-    #     $regexp =~ s/\*/.*/g;
-    #     for ($f = 1; $f <= $files; ++$f) {
-    #         if ($filename[$f] =~ /$regexp/i) {
-    #             printf "%-15s %s\n", $filename[$f], $image_filename;
-    #         };
-    #     };
-    #     # $done = TRUE;
-    # };
 
     if ($INFO) {
         # display_all_info;
@@ -449,53 +576,12 @@ while (@ARGV) {
         for ($f = 1; $f <= $files; ++$f) {
             if ($filename[$f] =~ /$regexp/i) {
                 ($beeb_filename, $load_addr, $exec_addr, $length) = file_info $f;
-                if ($DUMP) {
-                    if ($OUT_FILE) {
-                        open OFH, ">", $OUT_FILE or die "Could not open $OUT_FILE for writing:$!";
-                        select OFH;
-                    };
-                    $data = target_file $f;
-                    my $addr = $load_addr;
-                    $addr &= 0xffff if $DIGITS == 4;
-                    my $c = 0;
-                    my $chars = "";
-                    printf " %0${DIGITS}X", $addr;
-                    foreach (split //, $data) {
-                        if ($c >= $COLS) {
-                            printf " %s\n %0${DIGITS}X", $chars, $addr;
-                            $chars = "";
-                            $c = 0;
-                        };
-                        printf " %02X", ord $_;
-                        if ($_ ge " " && $_ le "~") {
-                            $chars .= $_;
-                        }
-                        else {
-                            $chars .= ".";
-                        };
-                        ++$addr;
-                        ++$c;
-                    };
-                    if ($c < $COLS) {
-                        foreach ($c .. $COLS - 1) {
-                            print " --";
-                            $chars .= " ";
-                        };
-                    };
-                    printf " %s\n", $chars;
-                    if ($OUT_FILE) {
-                        select STDOUT;
-                        close OFH;
-                    };
-                }
-                else {                        
-                    # $beeb_filename = $filename[$f];
-                    # $load_addr = $load[$f];
-                    # $exec_addr = $exec[$f];
-                    # $length = $length[$f];
-                    # printf "%-15s %s\n", $filename[$f], $image_filename;
+                $data = target_file $f;
+                $write = FALSE;
+                if (defined $GFX_MODE) {
+                    my $screen = graphics_dump $GFX_MODE, $LARGE, $data;
                     if (defined $OUT_FILE) {
-                        printf "Output filename is '%s'\n", $OUT_FILE;
+                        # printf "Output filename is '%s'\n", $OUT_FILE;
                         $filename = $OUT_FILE;
                     }
                     else {
@@ -505,8 +591,73 @@ while (@ARGV) {
                         $filename =~ s/\$\.//;
                         # printf "as '%s'\n", $filename;
                     };
-                    # printf "*****  EXTRACTING \"%s\" TO HOST AS \"%s\"\n", $filename[$f], $filename;
-                    $data = target_file $f;
+                    $filename .= ".png" unless $filename =~ /^...*\..+$/;
+                    $data = $screen->png;
+                    # $warning = sprintf "We have %d bytes of PNG data\n", length $data;
+                    $write = TRUE;
+                }
+                elsif ($DUMP) {
+                    #if ($OUT_FILE) {
+                    #    open OFH, ">", $OUT_FILE or die "Could not open $OUT_FILE for writing:$!";
+                    #    select OFH;
+                    #};
+                    #my $addr = $load_addr;
+                    #$addr &= 0xffff if $DIGITS == 4;
+                    #my $c = 0;
+                    #my $chars = "";
+                    #printf " %0${DIGITS}X", $addr;
+                    #foreach (split //, $data) {
+                    #    if ($c >= $COLS) {
+                    #        printf " %s\n %0${DIGITS}X", $chars, $addr;
+                    #        $chars = "";
+                    #        $c = 0;
+                    #    };
+                    #    printf " %02X", ord $_;
+                    #    if ($_ ge " " && $_ le "~") {
+                    #        $chars .= $_;
+                    #    }
+                    #    else {
+                    #        $chars .= ".";
+                    #    };
+                    #    ++$addr;
+                    #    ++$c;
+                    #};
+                    #if ($c < $COLS) {
+                    #    foreach ($c .. $COLS - 1) {
+                    #        print " --";
+                    #        $chars .= " ";
+                    #    };
+                    #};
+                    #printf " %s\n", $chars;
+                    #if ($OUT_FILE) {
+                    #    select STDOUT;
+                    #    close OFH;
+                    #};
+                    if (defined $OUT_FILE) {
+                        # printf "Output filename is '%s'\n", $OUT_FILE;
+                        $filename = $OUT_FILE;
+                    }
+                    else {
+                        #$filename = $beeb_filename;
+                        ## printf "Saving '%s' ", $filename;
+                        #$filename =~ s/^\s*|\s*$//g;
+                        #$filename =~ s/\$\.//;
+                        ## printf "as '%s'\n", $filename;
+                        $filename = "";
+                    };
+                    $data = hex_dump $data, $load_addr;
+                    $write = TRUE;
+                }
+                else {                        
+                    if (defined $OUT_FILE) {
+                        printf "Output filename is '%s'\n", $OUT_FILE;
+                        $filename = $OUT_FILE;
+                    }
+                    else {
+                        $filename = $beeb_filename;
+                        $filename =~ s/^\s*|\s*$//g;
+                        $filename =~ s/\$\.//;
+                    };
 
                     #  BASIC programs have exec=&8023 (ModB) or &802A (M128)
                     if ((($exec_addr & 0xffff) >= 0x8000 && ($exec_addr & 0xffff) <= 0x80ff && !$RAW) || $BASIC) {
@@ -518,7 +669,10 @@ while (@ARGV) {
                         $warning = sprintf "De-beebifying line endings of %s", $beeb_filename;
                         $data =~ s/\n\r/\n/g;
                     };
-                    
+                    $write = TRUE;
+                };
+                
+                if ($write) {
                     if (-e $filename && !$FORCE) {
                         die "$filename already exists";
                     }
