@@ -38,6 +38,30 @@ Interactively extract files from the disc image.
 
 Various non-interactive ways to use the program, especially within scripts.
 
+### Examples
+
+`$ dfsbuster -i birthday.ssd`
+
+Produces an equivalent output to `*INFO *.*` from the disc image
+`birthday.ssd`.
+
+`$ dfsbuster -x MENU -o menu.bas -b bcp_utils.ssd`
+
+Extracts the BASIC program `$.MENU` from the disc image `utils.ssd`,
+detokenises it and saves the resulting plain text file as `menu.bas`.
+
+`$ dfsbuster -x MENU -o - -b bcp_utils.ssd`
+
+Extracts the BASIC program `$.MENU` from the disc image `utils.ssd`,
+detokenises it and displays the resulting plain text on screen.  This
+is equivalent to `LIST` in BBC BASIC.
+
+`$ dfsbuster -x S.AMP1 -m 1 -L -o bcp_amp1.png bcp_work1.ssd`
+
+Extracts the file `S.AMP1` from the disc image `bcp_work1.ssd` as a
+saved MODE 1 screen  (`*SAVE S.AMP1 3000 8000`),  with the output
+filename `bcp_amp1.png`, and a size of 640 * 512.
+
 ## Interactive Operation
 
 If invoked from a terminal session with no options, just an image
@@ -126,30 +150,6 @@ or "detokenise" translation mode may be selected automatically based on
 the file's load and execution addresses, as in interactive mode; or
 else the output will be in raw format.  Hex and graphics dumps must be
 selected explicitly.
-
-## Examples
-
-`$ dfsbuster -i birthday.ssd`
-
-Produces an equivalent output to `*INFO *.*` from the disc image
-`birthday.ssd`.
-
-`$ dfsbuster -x MENU -o menu.bas -b bcp_utils.ssd`
-
-Extracts the BASIC program `$.MENU` from the disc image `utils.ssd`,
-detokenises it and saves the resulting plain text file as `menu.bas`.
-
-`$ dfsbuster -x MENU -o - -b bcp_utils.ssd`
-
-Extracts the BASIC program `$.MENU` from the disc image `utils.ssd`,
-detokenises it and displays the resulting plain text on screen.  This
-is equivalent to `LIST` in BBC BASIC.
-
-`$ dfsbuster -x S.AMP1 -m 1 -L -o bcp_amp1.png bcp_work1.ssd`
-
-Extracts the file `S.AMP1` from the disc image `bcp_work1.ssd` as a
-saved MODE 1 screen  (`*SAVE S.AMP1 3000 8000`),  with the output
-filename `bcp_amp1.png`, and a size of 640 * 512.
 
 # History
 
